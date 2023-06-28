@@ -9,6 +9,102 @@
 #include <SoundData.h>
 #include <BluetoothA2DP.h>
 
+#include <WiFi.h>
+#include <WiFiClient.h>
+#include <WebServer.h>
+#include <ESPmDNS.h>
+#include <Update.h>
+
+WebServer server(80);
+
+
+/*
+ * Login page
+ */
+
+const char* loginIndex =
+ "<form name='loginForm'>"
+    "<table width='20%' bgcolor='A09F9F' align='center'>"
+        "<tr>"
+            "<td colspan=2>"
+                "<center><font size=4><b>ESP32 Login Page</b></font></center>"
+                "<br>"
+            "</td>"
+            "<br>"
+            "<br>"
+        "</tr>"
+        "<tr>"
+             "<td>Username:</td>"
+             "<td><input type='text' size=25 name='userid'><br></td>"
+        "</tr>"
+        "<br>"
+        "<br>"
+        "<tr>"
+            "<td>Password:</td>"
+            "<td><input type='Password' size=25 name='pwd'><br></td>"
+            "<br>"
+            "<br>"
+        "</tr>"
+        "<tr>"
+            "<td><input type='submit' onclick='check(this.form)' value='Login'></td>"
+        "</tr>"
+    "</table>"
+"</form>"
+"<script>"
+    "function check(form)"
+    "{"
+    "if(form.userid.value=='admin' && form.pwd.value=='admin')"
+    "{"
+    "window.open('/serverIndex')"
+    "}"
+    "else"
+    "{"
+    " alert('Error Password or Username')/*displays error message*/"
+    "}"
+    "}"
+"</script>";
+
+/*
+ * Server Index Page
+ */
+
+const char* serverIndex =
+"<script src='https://ajax.googleapis.com/ajax/libs/jquery/3.2.1/jquery.min.js'></script>"
+"<form method='POST' action='#' enctype='multipart/form-data' id='upload_form'>"
+   "<input type='file' name='update'>"
+        "<input type='submit' value='Update'>"
+    "</form>"
+ "<div id='prg'>progress: 0%</div>"
+ "<script>"
+  "$('form').submit(function(e){"
+  "e.preventDefault();"
+  "var form = $('#upload_form')[0];"
+  "var data = new FormData(form);"
+  " $.ajax({"
+  "url: '/update',"
+  "type: 'POST',"
+  "data: data,"
+  "contentType: false,"
+  "processData:false,"
+  "xhr: function() {"
+  "var xhr = new window.XMLHttpRequest();"
+  "xhr.upload.addEventListener('progress', function(evt) {"
+  "if (evt.lengthComputable) {"
+  "var per = evt.loaded / evt.total;"
+  "$('#prg').html('progress: ' + Math.round(per*100) + '%');"
+  "}"
+  "}, false);"
+  "return xhr;"
+  "},"
+  "success:function(d, s) {"
+  "console.log('success!')"
+ "},"
+ "error: function (a, b, c) {"
+ "}"
+ "});"
+ "});"
+ "</script>";
+
 BluetoothA2DPSink a2dp_sink;
 
 MBus mBus(21);
@@ -17,7 +113,46 @@ void avrc_metadata_callback(uint8_t data1, const uint8_t *data2) {
   Serial.printf("AVRC metadata rsp: attribute id 0x%x, %s\n", data1, data2);
 }
 
-void setup() {    
+void setupOta() {
+  WiFi.softAP("Subaru", "Outback-ESP32");
+
+    server.on("/", HTTP_GET, []() {
+    server.sendHeader("Connection", "close");
+    server.send(200, "text/html", loginIndex);
+  });
+  server.on("/serverIndex", HTTP_GET, []() {
+    server.sendHeader("Connection", "close");
+    server.send(200, "text/html", serverIndex);
+  });
+  /*handling uploading firmware file */
+  server.on("/update", HTTP_POST, []() {
+    server.sendHeader("Connection", "close");
+    server.send(200, "text/plain", (Update.hasError()) ? "FAIL" : "OK");
+    ESP.restart();
+  }, []() {
+    HTTPUpload& upload = server.upload();
+    if (upload.status == UPLOAD_FILE_START) {
+      Serial.printf("Update: %s\n", upload.filename.c_str());
+      if (!Update.begin(UPDATE_SIZE_UNKNOWN)) { //start with max available size
+        Update.printError(Serial);
+      }
+    } else if (upload.status == UPLOAD_FILE_WRITE) {
+      /* flashing firmware to ESP*/
+      if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
+        Update.printError(Serial);
+      }
+    } else if (upload.status == UPLOAD_FILE_END) {
+      if (Update.end(true)) { //true to set the size to the current progress
+        Serial.printf("Update Success: %u\nRebooting...\n", upload.totalSize);
+      } else {
+        Update.printError(Serial);
+      }
+    }
+  });
+  server.begin();
+}
+
+void setupA2dp() {    
   static const i2s_config_t i2s_config = {
        .mode = (i2s_mode_t) (I2S_MODE_MASTER | I2S_MODE_TX),
        .sample_rate = 41000,
@@ -33,13 +168,16 @@ void setup() {
   a2dp_sink.set_i2s_config(i2s_config);
   a2dp_sink.set_avrc_metadata_callback(avrc_metadata_callback);
   a2dp_sink.start("Subaru");
+}
 
-  pinMode(21, (OUTPUT_OPEN_DRAIN | INPUT));
-  digitalWrite(21, HIGH);
-
+void setup()
+{
   Serial.begin(115200);
-
-  Serial.println("Loop finished");
+  
+  setupA2dp();
+  setupOta();
+  
+  Serial.println("Setup finished");
 }
 
 void loop()
@@ -54,23 +192,20 @@ void loop()
     {
       mBus.send(0xe8);//acknowledge Ping
       delay(7);
-      mBus.send(0x69); // ???
+      mBus.send(0x69); // ???  Is this necessary?
       delay(7);
       mBus.send(0xEF00000); // Wait
       delay(7);
       mBus.sendChangedCD(1, 1);
-      //mBus.send(0xEB910000008); // sendChangedCD
-      //delay(7);
-      //mBus.send(0xED100000000000C00); // Available discs, disk 1 only // TODO - is this necessary?
       delay(7);
       mBus.sendCDStatus(1);
-      //mBus.send(0xEC1000000000); // sendCDStatus
       delay(7);
       mBus.sendPlayingTrack(1, 110);
-      //mBus.send(0xE90000100000008); // sendPlayingTrack
       Serial.println("Sending ping");
     } else if (receivedMessage == 0x611012) {
       
     }
   }
+
+  server.handleClient();
 }
