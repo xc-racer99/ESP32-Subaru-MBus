@@ -15,8 +15,14 @@
 #include <ESPmDNS.h>
 #include <Update.h>
 
+#include "jquery.min.js.h"
+
 WebServer server(80);
 
+uint64_t buf[30];
+uint64_t nextBufIndex = 0;
+
+char bufText[30 * 16];
 
 /*
  * Login page
@@ -69,7 +75,7 @@ const char* loginIndex =
  */
 
 const char* serverIndex =
-"<script src='https://ajax.googleapis.com/ajax/libs/jquery/3.2.1/jquery.min.js'></script>"
+"<script src='/jquery.min.js'></script>"
 "<form method='POST' action='#' enctype='multipart/form-data' id='upload_form'>"
    "<input type='file' name='update'>"
         "<input type='submit' value='Update'>"
@@ -105,6 +111,41 @@ const char* serverIndex =
  "});"
  "</script>";
 
+void onJavaScript(void) {
+    Serial.println("onJavaScript(void)");
+    server.setContentLength(jquery_min_js_v3_2_1_gz_len);
+    server.sendHeader(F("Content-Encoding"), F("gzip"));
+    server.send_P(200, "text/javascript", jquery_min_js_v3_2_1_gz, jquery_min_js_v3_2_1_gz_len);
+}
+
+void onLog(void) {
+  char msg[16];
+  
+  bufText[0] = '\0';
+  for (int i = nextBufIndex; i < sizeof(buf) / sizeof(buf[0]); i++) {
+    sprintf(msg, "0x%llx\n", buf[i]);
+    strcat(bufText, msg);
+  }
+
+  if (nextBufIndex != 0) {
+    for (int i = 0; i < nextBufIndex; i++) {
+      sprintf(msg, "0x%llx\n", buf[i]);
+      strcat(bufText, msg);
+    }
+  }
+
+  server.send(200, "text/html", bufText);
+}
+
+void logPacket(uint64_t packet) {
+  nextBufIndex++;
+  if (nextBufIndex == sizeof(buf) / sizeof(buf[0])) {
+    nextBufIndex = 0;
+  }
+
+  buf[nextBufIndex] = packet;
+}
+
 BluetoothA2DPSink a2dp_sink;
 
 MBus mBus(21);
@@ -116,7 +157,11 @@ void avrc_metadata_callback(uint8_t data1, const uint8_t *data2) {
 void setupOta() {
   WiFi.softAP("Subaru", "Outback-ESP32");
 
-    server.on("/", HTTP_GET, []() {
+  server.on("/jquery.min.js", HTTP_GET, onJavaScript);
+
+  server.on("/log", HTTP_GET, onLog);
+
+  server.on("/", HTTP_GET, []() {
     server.sendHeader("Connection", "close");
     server.send(200, "text/html", loginIndex);
   });
@@ -187,14 +232,19 @@ void loop()
   if(mBus.receive(&receivedMessage))
   {
     Serial.println(receivedMessage, HEX);
+
+    logPacket(receivedMessage);
     
     if (receivedMessage == 0x68)
     {
       mBus.send(0xe8);//acknowledge Ping
+      logPacket(0xe8);
       delay(7);
       mBus.send(0x69); // ???  Is this necessary?
+      logPacket(0x69);
       delay(7);
       mBus.send(0xEF00000); // Wait
+      logPacket(0xEF00000);
       delay(7);
       mBus.sendChangedCD(1, 1);
       delay(7);
@@ -202,6 +252,8 @@ void loop()
       delay(7);
       mBus.sendPlayingTrack(1, 110);
       Serial.println("Sending ping");
+    } else if (receivedMessage == 0x28 || receivedMessage == 0x28) {
+      mBus.sendPlayingTrack(1, 110);
     } else if (receivedMessage == 0x611012) {
       
     }
