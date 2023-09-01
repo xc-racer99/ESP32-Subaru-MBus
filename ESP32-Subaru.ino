@@ -148,6 +148,7 @@ void logPacket(uint64_t packet) {
 
 BluetoothA2DPSink a2dp_sink;
 
+//MBus mBus(18, 19);
 MBus mBus(21);
 
 void avrc_metadata_callback(uint8_t data1, const uint8_t *data2) {
@@ -225,37 +226,35 @@ void setup()
   Serial.println("Setup finished");
 }
 
+unsigned long lastUpdate = 0;
+bool firstUpdateSent = false;
+
 void loop()
 {
-  uint64_t receivedMessage = 0;  
+  uint64_t receivedMessage = 0;
+
+  if (firstUpdateSent && lastUpdate - millis() > 1000) {
+    //mBus.sendPlayingTrack(1,111);
+  }
 
   if(mBus.receive(&receivedMessage))
   {
     Serial.println(receivedMessage, HEX);
-
-    logPacket(receivedMessage);
-    
-    if (receivedMessage == 0x68)
-    {
+    if (receivedMessage == 0x68) {
       mBus.send(0xe8);//acknowledge Ping
-      logPacket(0xe8);
       delay(7);
       mBus.send(0x69); // ???  Is this necessary?
-      logPacket(0x69);
       delay(7);
       mBus.send(0xEF00000); // Wait
-      logPacket(0xEF00000);
       delay(7);
       mBus.sendChangedCD(1, 1);
       delay(7);
       mBus.sendCDStatus(1);
       delay(7);
       mBus.sendPlayingTrack(1, 110);
+      lastUpdate = millis();
+      firstUpdateSent = true;
       Serial.println("Sending ping");
-    } else if (receivedMessage == 0x28 || receivedMessage == 0x28) {
-      mBus.sendPlayingTrack(1, 110);
-    } else if (receivedMessage == 0x611012) {
-      
     }
   }
 
