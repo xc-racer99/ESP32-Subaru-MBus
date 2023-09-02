@@ -149,12 +149,7 @@ void logPacket(uint64_t packet) {
 BluetoothA2DPSink a2dp_sink;
 
 //MBus mBus(18, 19);
-MBus mBus(0, 21);
-
-void onDataTimer(void)
-{
-  mBus.onDataTimer();
-}
+MBus mBus(21);
 
 void avrc_metadata_callback(uint8_t data1, const uint8_t *data2) {
   Serial.printf("AVRC metadata rsp: attribute id 0x%x, %s\n", data1, data2);
@@ -224,8 +219,7 @@ void setupA2dp() {
 void setup()
 {
   Serial.begin(115200);
-
-  timerAttachInterrupt(mBus.dataTimer, &onDataTimer, true);
+  
   setupA2dp();
   setupOta();
   
@@ -239,15 +233,24 @@ void loop()
 {
   uint64_t receivedMessage = 0;
 
+  if (firstUpdateSent && lastUpdate - millis() > 1000) {
+    //mBus.sendPlayingTrack(1,111);
+  }
+
   if(mBus.receive(&receivedMessage))
   {
     Serial.println(receivedMessage, HEX);
     if (receivedMessage == 0x68) {
       mBus.send(0xe8);//acknowledge Ping
+      delay(7);
       mBus.send(0x69); // ???  Is this necessary?
+      delay(7);
       mBus.send(0xEF00000); // Wait
+      delay(7);
       mBus.sendChangedCD(1, 1);
+      delay(7);
       mBus.sendCDStatus(1);
+      delay(7);
       mBus.sendPlayingTrack(1, 110);
       lastUpdate = millis();
       firstUpdateSent = true;
