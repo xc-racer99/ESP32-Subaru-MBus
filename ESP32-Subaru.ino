@@ -228,6 +228,7 @@ void setup()
 
 unsigned long lastUpdate = 0;
 bool firstUpdateSent = false;
+bool btHasConnected = false;
 
 void loop()
 {
@@ -258,5 +259,13 @@ void loop()
     }
   }
 
-  server.handleClient();
+  if (!btHasConnected) {
+    if (a2dp_sink.is_connected()) {
+      btHasConnected = true;
+      server.stop();
+      WiFi.softAPdisconnect(true);
+    }
+    server.handleClient();
+  }
+  
 }
