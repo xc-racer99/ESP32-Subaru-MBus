@@ -229,6 +229,7 @@ void setup()
 unsigned long lastUpdate = 0;
 bool firstUpdateSent = false;
 bool btHasConnected = false;
+int currentDisk = 1;
 
 void loop()
 {
@@ -248,19 +249,31 @@ void loop()
       delay(7);
       mBus.send(0xEF00000); // Wait
       delay(7);
-      mBus.sendChangedCD(1, 1);
+      mBus.sendChangedCD(currentDisk, 1);
       delay(7);
-      mBus.sendCDStatus(1);
+      mBus.sendCDStatus(currentDisk);
       delay(7);
-      mBus.sendPlayingTrack(1, 110);
+      mBus.sendPlayingTrack(currentDisk, 110);
       lastUpdate = millis();
       firstUpdateSent = true;
-      Serial.println("Sending ping");
+    }
+    else if ((receivedMessage & 0xfff0ff) == 0x613000)
+    {
+      int newDisk = (receivedMessage & 0xf00) >> 12;
+      if (newDisk > currentDisk || (newDisk == 1 && currentDisk == 6)) {
+        a2dp_sink.next();
+      } else if (newDisk != currentDisk) {
+        a2dp_sink.previous();
+      }
+      currentDisk = newDisk;
     }
   }
 
   if (!btHasConnected) {
     if (a2dp_sink.is_connected()) {
+      // First connection - send play
+      a2dp_sink.play();
+      
       btHasConnected = true;
       server.stop();
       WiFi.softAPdisconnect(true);
