@@ -227,9 +227,11 @@ void setup()
 }
 
 unsigned long lastUpdate = 0;
+unsigned long lastStop = 0;
 bool firstUpdateSent = false;
 bool btHasConnected = false;
 int currentDisk = 1;
+bool pauseSent = false;
 
 void loop()
 {
@@ -241,8 +243,10 @@ void loop()
 
   if(mBus.receive(&receivedMessage))
   {
+    logPacket(receivedMessage);
     Serial.println(receivedMessage, HEX);
     if (receivedMessage == 0x68) {
+      logPacket(0x1);
       mBus.send(0xe8);//acknowledge Ping
       delay(7);
       mBus.send(0x69); // ???  Is this necessary?
@@ -253,19 +257,36 @@ void loop()
       delay(7);
       mBus.sendCDStatus(currentDisk);
       delay(7);
-      mBus.sendPlayingTrack(currentDisk, 110);
+      mBus.sendPlayingTrack(1, 110);
       lastUpdate = millis();
       firstUpdateSent = true;
     }
-    else if ((receivedMessage & 0xfff0ff) == 0x613000)
+    else if ((receivedMessage & 0xfff0fff) == 0x6130001)
     {
-      int newDisk = (receivedMessage & 0xf00) >> 12;
+      int newDisk = (receivedMessage & 0xf000) >> 12;
+      logPacket(0x10 + newDisk);
       if (newDisk > currentDisk || (newDisk == 1 && currentDisk == 6)) {
         a2dp_sink.next();
       } else if (newDisk != currentDisk) {
         a2dp_sink.previous();
       }
       currentDisk = newDisk;
+    }
+    else if (receivedMessage == 0x611402)
+    {
+      lastStop = millis();
+      if (a2dp_sink.is_connected()) {
+        a2dp_sink.pause();
+        pauseSent = true;
+      }
+    }
+  }
+
+  if (lastStop - millis() > 1000 && pauseSent) {
+    if (a2dp_sink.is_connected()) {
+      a2dp_sink.play();
+      pauseSent = false;
+      logPacket(0x2);
     }
   }
 
