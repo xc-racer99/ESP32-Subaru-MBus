@@ -275,14 +275,14 @@ void loop()
     else if (receivedMessage == 0x611402)
     {
       lastStop = millis();
-      if (a2dp_sink.is_connected()) {
+      if (a2dp_sink.is_connected() && !pauseSent) {
         a2dp_sink.pause();
         pauseSent = true;
       }
     }
   }
 
-  if (lastStop - millis() > 1000 && pauseSent) {
+  if (millis() - lastStop > 1000 && pauseSent) {
     if (a2dp_sink.is_connected()) {
       a2dp_sink.play();
       pauseSent = false;
